@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-predictor
+  namespace: lone1
+
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ml-predictor
+
+  template:
+    metadata:
+      labels:
+        app: ml-predictor
+
+    spec:
+      containers:
+        - name: ml-predictor
+          image: abhi0806/lone1-ml-predictor:latest
+          ports:
+            - containerPort: 8001
+
+          envFrom:
+            - configMapRef:
+                name: lone1-config
+
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/model
+
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: model-pvc

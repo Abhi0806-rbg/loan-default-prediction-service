@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-api
+  namespace: lone1
+
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backend-api
+
+  template:
+    metadata:
+      labels:
+        app: backend-api
+
+    spec:
+      containers:
+        - name: backend-api
+          image: abhi0806/lone1-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+
+          envFrom:
+            - configMapRef:
+                name: lone1-config
+            - secretRef:
+                name: lone1-secret

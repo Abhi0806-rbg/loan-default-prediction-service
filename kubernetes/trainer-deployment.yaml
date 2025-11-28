@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-trainer
+  namespace: lone1
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ml-trainer
+
+  template:
+    metadata:
+      labels:
+        app: ml-trainer
+
+    spec:
+      containers:
+        - name: ml-trainer
+          image: abhi0806/lone1-ml-trainer:latest
+          ports:
+            - containerPort: 8002
+
+          envFrom:
+            - configMapRef:
+                name: lone1-config
+
+          volumeMounts:
+            - name: model-storage
+              mountPath: /app/model
+
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: model-pvc

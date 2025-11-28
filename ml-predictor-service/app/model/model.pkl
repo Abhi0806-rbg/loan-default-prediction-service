@@ -1,0 +1,5 @@
+model.pkl is a binary file and cannot be shown in text.
+
+It is created by the ML Trainer microservice (SECTION 6).
+The ML Predictor loads this file at startup from:
+ml-predictor-service/app/model/model.pkl

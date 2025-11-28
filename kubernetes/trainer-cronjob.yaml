@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ml-trainer-cron
+  namespace: lone1
+
+spec:
+  schedule: "0 3 * * *" # every day at 3AM
+
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: ml-trainer
+              image: abhi0806/lone1-ml-trainer:latest
+              command: ["python", "training.py"]
+              volumeMounts:
+                - name: model-storage
+                  mountPath: /app/model
+
+          restartPolicy: OnFailure
+
+          volumes:
+            - name: model-storage
+              persistentVolumeClaim:
+                claimName: model-pvc

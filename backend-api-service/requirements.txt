@@ -1,0 +1,10 @@
+python-dotenv
+pydantic
+pydantic[email]
+motor
+pymongo
+httpx
+python-jose
+passlib[bcrypt]
+bcrypt
+dnspython

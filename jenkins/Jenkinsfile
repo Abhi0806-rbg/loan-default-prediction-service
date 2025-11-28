@@ -1,0 +1,159 @@
+pipeline {
+    agent any
+
+    environment {
+        REGISTRY = "your-dockerhub-username"
+        BACKEND_IMAGE = "lone1-backend"
+        PREDICTOR_IMAGE = "lone1-predictor"
+        TRAINER_IMAGE = "lone1-trainer"
+        FRONTEND_IMAGE = "lone1-frontend"
+        VERSION = "${env.BUILD_NUMBER}"
+        KUBECONFIG_CREDENTIALS = "kubeconfig-cred"
+    }
+
+    stages {
+
+        /* -----------------------------------------------------------
+           Stage 1: Checkout Code
+        ----------------------------------------------------------- */
+        stage('Checkout') {
+            steps {
+                echo "Cloning repository..."
+                git branch: 'main', url: 'https://github.com/yourusername/lone-1.git'
+            }
+        }
+
+        /* -----------------------------------------------------------
+           Stage 2: Install Dependencies + Linting
+        ----------------------------------------------------------- */
+        stage('Lint & Unit Tests') {
+            parallel {
+
+                stage('Backend Lint') {
+                    agent { docker { image 'python:3.10' } }
+                    steps {
+                        sh '''
+                            pip install -r backend-api-service/requirements.txt
+                            pip install flake8 pytest
+                            flake8 backend-api-service/app --ignore=E501
+                            pytest tests/unit
+                        '''
+                    }
+                }
+
+                stage('Frontend Lint') {
+                    agent { docker { image 'node:18' } }
+                    steps {
+                        sh '''
+                            cd frontend
+                            npm install
+                            npm run lint
+                        '''
+                    }
+                }
+            }
+        }
+
+        /* -----------------------------------------------------------
+           Stage 3: Selenium E2E Tests
+        ----------------------------------------------------------- */
+        stage('Selenium Tests') {
+    steps {
+        sh '''
+            pip3 install -r tests/selenium/requirements.txt
+            pytest tests/selenium --disable-warnings
+        '''
+    }
+}
+        /* -----------------------------------------------------------
+           Stage 4: Build Docker Images
+        ----------------------------------------------------------- */
+        stage('Build Docker Images') {
+            steps {
+                script {
+                    docker.build("${REGISTRY}/${BACKEND_IMAGE}:${VERSION}", "backend-api-service")
+                    docker.build("${REGISTRY}/${PREDICTOR_IMAGE}:${VERSION}", "ml-predictor-service")
+                    docker.build("${REGISTRY}/${TRAINER_IMAGE}:${VERSION}", "ml-trainer-service")
+                    docker.build("${REGISTRY}/${FRONTEND_IMAGE}:${VERSION}", "frontend")
+                }
+            }
+        }
+
+        /* -----------------------------------------------------------
+           Stage 5: Push Images to Docker Hub
+        ----------------------------------------------------------- */
+        stage('Push Docker Images') {
+            steps {
+                script {
+                    docker.withRegistry("https://index.docker.io/v1/", "dockerhub-credentials") {
+
+                        docker.image("${REGISTRY}/${BACKEND_IMAGE}:${VERSION}").push()
+                        docker.image("${REGISTRY}/${BACKEND_IMAGE}:${VERSION}").push("latest")
+
+                        docker.image("${REGISTRY}/${PREDICTOR_IMAGE}:${VERSION}").push()
+                        docker.image("${REGISTRY}/${PREDICTOR_IMAGE}:${VERSION}").push("latest")
+
+                        docker.image("${REGISTRY}/${TRAINER_IMAGE}:${VERSION}").push()
+                        docker.image("${REGISTRY}/${TRAINER_IMAGE}:${VERSION}").push("latest")
+
+                        docker.image("${REGISTRY}/${FRONTEND_IMAGE}:${VERSION}").push()
+                        docker.image("${REGISTRY}/${FRONTEND_IMAGE}:${VERSION}").push("latest")
+                    }
+                }
+            }
+        }
+
+        /* -----------------------------------------------------------
+           Stage 6: Deploy to Kubernetes
+        ----------------------------------------------------------- */
+        stage('Deploy to Kubernetes') {
+            steps {
+                withCredentials([file(credentialsId: "${KUBECONFIG_CREDENTIALS}", variable: 'KUBECONFIG_FILE')]) {
+                    sh '''
+                        mkdir -p ~/.kube
+                        cp $KUBECONFIG_FILE ~/.kube/config
+
+                        # Update image versions in deployment files
+                        sed -i "s|IMAGE_BACKEND|${REGISTRY}/${BACKEND_IMAGE}:${VERSION}|g" kubernetes/backend-deployment.yaml
+                        sed -i "s|IMAGE_PREDICTOR|${REGISTRY}/${PREDICTOR_IMAGE}:${VERSION}|g" kubernetes/predictor-deployment.yaml
+                        sed -i "s|IMAGE_TRAINER|${REGISTRY}/${TRAINER_IMAGE}:${VERSION}|g" kubernetes/trainer-deployment.yaml
+                        sed -i "s|IMAGE_FRONTEND|${REGISTRY}/${FRONTEND_IMAGE}:${VERSION}|g" kubernetes/frontend-deployment.yaml
+
+                        # Apply to Kubernetes (Rolling update)
+                        kubectl apply -f kubernetes/
+                    '''
+                }
+            }
+        }
+
+        /* -----------------------------------------------------------
+           Stage 7: Health Check & Auto Rollback
+        ----------------------------------------------------------- */
+        stage('Post-Deployment Validation') {
+            steps {
+                script {
+                    def status = sh(script: "kubectl rollout status deployment/backend-api-deployment", returnStatus: true)
+
+                    if (status != 0) {
+                        echo "Deployment failed! Rolling back..."
+                        sh "kubectl rollout undo deployment/backend-api-deployment"
+                        sh "kubectl rollout undo deployment/ml-predictor-deployment"
+                        sh "kubectl rollout undo deployment/ml-trainer-deployment"
+                        sh "kubectl rollout undo deployment/frontend-deployment"
+
+                        error("Deployment rolled back due to failure.")
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployment successful!"
+        }
+        failure {
+            echo "Deployment failed!"
+        }
+    }
+}
